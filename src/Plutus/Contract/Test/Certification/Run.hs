@@ -37,6 +37,7 @@ module Plutus.Contract.Test.Certification.Run
   , certificationTasks
   , hasQuickCheckTests
   , defaultCertificationOptions
+  , defaultCertOptNumTests
   , certify
   , certifyWithOptions
   , certifyWithCheckOptions
