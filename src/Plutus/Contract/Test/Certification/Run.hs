@@ -31,6 +31,7 @@ module Plutus.Contract.Test.Certification.Run
   , certRes_DLTests
   -- * and we have a function for running certification
   , CertificationOptions(..)
+  , CertOptNumTests(..)
   , CertificationEvent(..)
   , CertificationTask(..)
   , certificationTasks
@@ -39,6 +40,8 @@ module Plutus.Contract.Test.Certification.Run
   , certify
   , certifyWithOptions
   , certifyWithCheckOptions
+  , certifyWithOutput
+  , certifyWithCheckOptionsAndOutput
   ) where
 
 import Control.Concurrent.Chan
@@ -167,10 +170,35 @@ data CertificationOptions = CertificationOptions { certOptNumTests  :: Int
                                                  , certEventChannel :: Maybe (Chan CertificationEvent)
                                                  }
 
+
+data CertOptNumTests = CertOptNumTests { numStandardProperty   :: Int
+                                       , numNoLockedFunds      :: Int
+                                       , numNoLockedFundsLight :: Int
+                                       , numCrashTolerance     :: Int
+                                       , numWhiteList          :: Int
+                                       , numDLTests            :: Int
+                                       }
+
+defaultCertOptNumTests :: CertOptNumTests
+defaultCertOptNumTests = CertOptNumTests { numStandardProperty   = 100
+                                         , numNoLockedFunds      = 100
+                                         , numNoLockedFundsLight = 100
+                                         , numCrashTolerance     = 100
+                                         , numWhiteList          = 100
+                                         , numDLTests            = 100
+                                         }
+
 defaultCertificationOptions :: CertificationOptions
 defaultCertificationOptions = CertificationOptions { certOptOutput = True
                                                    , certOptNumTests = 100
                                                    , certEventChannel = Nothing }
+
+updateCertificationOptions :: CertificationOptions -> Int -> CertificationOptions
+updateCertificationOptions CertificationOptions{..} numTests =
+                                        CertificationOptions { certOptNumTests = numTests
+                                                             , certOptOutput = certOptOutput
+                                                             , certEventChannel = certEventChannel
+                                                             }
 
 type CertMonad = WriterT CoverageReport IO
 
@@ -306,12 +334,25 @@ numTestsEvent opts | Just ch <- certEventChannel opts = liftIO $ writeChan ch $ 
                    | otherwise                        = pure ()
 
 certify :: forall m. ContractModel m => Certification m -> IO (CertificationReport m)
-certify m = certifyWithOptions defaultCertificationOptions m defaultCheckOptionsContractModel
+certify m = certifyWithOptions defaultCertificationOptions defaultCertOptNumTests m defaultCheckOptionsContractModel
 
-certifyWithCheckOptions :: forall m. ContractModel m => Certification m -> IO (CertificationReport m)
-certifyWithCheckOptions m = case certCheckOptions m of
-                              Nothing -> certifyWithOptions defaultCertificationOptions m defaultCheckOptionsContractModel
-                              Just copts -> certifyWithOptions defaultCertificationOptions m copts
+certifyWithOutput :: forall m. ContractModel m => Certification m -> IO (CertificationReport m)
+certifyWithOutput m = do
+                        c <- certify m
+                        writeCoverageReport "coverageReport"  (_certRes_coverageReport c)
+                        return c
+
+certifyWithCheckOptions :: forall m. ContractModel m => Certification m -> CertOptNumTests -> IO (CertificationReport m)
+certifyWithCheckOptions m optNumTest = case certCheckOptions m of
+                              Nothing -> certifyWithOptions defaultCertificationOptions optNumTest m defaultCheckOptionsContractModel
+                              Just copts -> certifyWithOptions defaultCertificationOptions optNumTest m copts
+
+certifyWithCheckOptionsAndOutput :: forall m. ContractModel m => Certification m -> CertOptNumTests -> IO (CertificationReport m)
+certifyWithCheckOptionsAndOutput m optNumTest = do
+                                                  c <- certifyWithCheckOptions m optNumTest
+                                                  writeCoverageReport "coverageReport"  (_certRes_coverageReport c)
+                                                  return c
+
 
 wrapTask :: CertificationOptions
          -> CertificationTask
@@ -332,32 +373,33 @@ wrapQCTask opts task m = wrapTask opts task QC.isSuccess $ numTestsEvent opts >>
 
 certifyWithOptions :: forall m. ContractModel m
                    => CertificationOptions
+                   -> CertOptNumTests
                    -> Certification m
                    -> CheckOptions
                    -> IO (CertificationReport m)
-certifyWithOptions opts Certification{..} copts = runCertMonad $ do
+certifyWithOptions opts CertOptNumTests{..} Certification{..} copts = runCertMonad $ do
   -- Unit tests
   unitTests    <- wrapTask opts UnitTestsTask (Prelude.all Tasty.resultSuccessful)
                 $ fromMaybe [] <$> traverse runUnitTests certUnitTests
   -- Standard property
   qcRes        <- wrapQCTask opts StandardPropertyTask
-                $ runStandardProperty @m opts certCoverageIndex copts
+                $ runStandardProperty @m (updateCertificationOptions opts numStandardProperty) certCoverageIndex copts
   -- TODO: fixme when double sat done
   -- Double satisfaction
   -- dsRes        <- wrapQCTask opts DoubleSatisfactionTask
   --               $ checkDS @m opts certCoverageIndex copts
   -- No locked funds
-  noLock       <- traverse (wrapQCTask opts NoLockedFundsTask . checkNoLockedFunds opts copts)
+  noLock       <- traverse (wrapQCTask (updateCertificationOptions opts numNoLockedFunds) NoLockedFundsTask . checkNoLockedFunds (updateCertificationOptions opts numNoLockedFunds) copts)
                            certNoLockedFunds
   -- No locked funds light
-  noLockLight  <- traverse (wrapQCTask opts NoLockedFundsLightTask . checkNoLockedFundsLight opts)
+  noLockLight  <- traverse (wrapQCTask (updateCertificationOptions opts numNoLockedFundsLight) NoLockedFundsLightTask . checkNoLockedFundsLight (updateCertificationOptions opts numNoLockedFundsLight))
                            certNoLockedFundsLight
   -- Crash tolerance
-  ctRes        <- checkDerived @WithCrashTolerance certCrashTolerance opts CrashToleranceTask certCoverageIndex copts
+  ctRes        <- checkDerived @WithCrashTolerance certCrashTolerance (updateCertificationOptions opts numCrashTolerance) CrashToleranceTask certCoverageIndex copts
   -- Whitelist
-  wlRes        <- checkWhitelist @m certWhitelist opts certCoverageIndex copts
+  wlRes        <- checkWhitelist @m certWhitelist (updateCertificationOptions opts numWhiteList) certCoverageIndex copts
   -- DL tests
-  dlRes        <- checkDLTests @m certDLTests opts certCoverageIndex copts
+  dlRes        <- checkDLTests @m certDLTests (updateCertificationOptions opts numDLTests) certCoverageIndex copts
   case certEventChannel opts of
     Just ch -> liftIO $ writeChan ch CertificationDone
     Nothing -> pure ()
