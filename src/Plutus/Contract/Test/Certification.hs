@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs           #-}
 module Plutus.Contract.Test.Certification where
 
+import Plutus.Contract.Test
 import Plutus.Contract.Test.ContractModel
 import Plutus.Contract.Test.ContractModel.CrashTolerance
 import PlutusTx.Coverage
@@ -19,7 +20,8 @@ data Certification m = Certification {
     certCrashTolerance     :: Maybe (Instance CrashTolerance m),  -- ^ Contract model for testing robustness against off-chain code crashes.
     certWhitelist          :: Maybe Whitelist,                    -- ^ List of allowed exceptions from on-chain code. Usually `Just 'defaultWhiteList'`.
     certUnitTests          :: Maybe (CoverageRef -> TestTree),    -- ^ Unit tests using "Test.Tasty". See e.g. 'Plutus.Contract.Test.checkPredicateCoverage'.
-    certDLTests            :: [(String, DL m ())]                 -- ^ Unit tests using 'Plutus.Contract.Test.ContractModel.DL'.
+    certDLTests            :: [(String, DL m ())],                -- ^ Unit tests using 'Plutus.Contract.Test.ContractModel.DL'.
+    certCheckOptions       :: Maybe CheckOptions                  -- ^ Check options for certification
   }
 
 defaultCertification :: Certification m
@@ -31,4 +33,5 @@ defaultCertification = Certification
   , certCrashTolerance     = Nothing
   , certWhitelist          = Just defaultWhitelist
   , certDLTests            = []
+  , certCheckOptions       = Nothing
   }
