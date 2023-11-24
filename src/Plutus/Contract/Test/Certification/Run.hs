@@ -41,8 +41,7 @@ module Plutus.Contract.Test.Certification.Run
   , certify
   , certifyWithOptions
   , certifyWithCheckOptions
-  , certifyWithOutput
-  , certifyWithCheckOptionsAndOutput
+  , genCoverageFile
   ) where
 
 import Control.Concurrent.Chan
@@ -335,25 +334,22 @@ numTestsEvent opts | Just ch <- certEventChannel opts = liftIO $ writeChan ch $ 
                    | otherwise                        = pure ()
 
 certify :: forall m. ContractModel m => Certification m -> IO (CertificationReport m)
-certify m = certifyWithOptions defaultCertificationOptions defaultCertOptNumTests m defaultCheckOptionsContractModel
+certify m = certifyWithOptions defaultCertificationOptions defaultCertOptNumTests m
 
-certifyWithOutput :: forall m. ContractModel m => Certification m -> IO (CertificationReport m)
-certifyWithOutput m = do
-                        c <- certify m
-                        writeCoverageReport "coverageReport"  (_certRes_coverageReport c)
-                        return c
+certifyWithCheckOptions :: forall m. ContractModel m
+                        => CertificationOptions
+                        -> Certification m
+                        -> CertOptNumTests
+                        -> IO (CertificationReport m)
+certifyWithCheckOptions opts m optNumTest = case certCheckOptions m of
+                              Nothing -> certifyWithOptions opts optNumTest m
+                              Just copts -> certifyWithOptions' opts optNumTest m copts
 
-certifyWithCheckOptions :: forall m. ContractModel m => Certification m -> CertOptNumTests -> IO (CertificationReport m)
-certifyWithCheckOptions m optNumTest = case certCheckOptions m of
-                              Nothing -> certifyWithOptions defaultCertificationOptions optNumTest m defaultCheckOptionsContractModel
-                              Just copts -> certifyWithOptions defaultCertificationOptions optNumTest m copts
-
-certifyWithCheckOptionsAndOutput :: forall m. ContractModel m => Certification m -> CertOptNumTests -> IO (CertificationReport m)
-certifyWithCheckOptionsAndOutput m optNumTest = do
-                                                  c <- certifyWithCheckOptions m optNumTest
-                                                  writeCoverageReport "coverageReport"  (_certRes_coverageReport c)
-                                                  return c
-
+genCoverageFile :: IO (CertificationReport m) -> IO (CertificationReport m)
+genCoverageFile report = do
+                           c <- report
+                           writeCoverageReport "coverageReport"  (_certRes_coverageReport c)
+                           return c
 
 wrapTask :: CertificationOptions
          -> CertificationTask
@@ -376,9 +372,16 @@ certifyWithOptions :: forall m. ContractModel m
                    => CertificationOptions
                    -> CertOptNumTests
                    -> Certification m
+                   -> IO (CertificationReport m)
+certifyWithOptions opts numTests m = certifyWithOptions' opts numTests m defaultCheckOptionsContractModel
+
+certifyWithOptions' :: forall m. ContractModel m
+                   => CertificationOptions
+                   -> CertOptNumTests
+                   -> Certification m
                    -> CheckOptions
                    -> IO (CertificationReport m)
-certifyWithOptions opts CertOptNumTests{..} Certification{..} copts = runCertMonad $ do
+certifyWithOptions' opts CertOptNumTests{..} Certification{..} copts = runCertMonad $ do
   -- Unit tests
   unitTests    <- wrapTask opts UnitTestsTask (Prelude.all Tasty.resultSuccessful)
                 $ fromMaybe [] <$> traverse runUnitTests certUnitTests
